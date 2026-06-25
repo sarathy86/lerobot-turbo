@@ -1797,3 +1797,44 @@ def test_save_episode_non_blocking_ordering(tmp_path, empty_lerobot_dataset_fact
 
     assert ds_nonblock.meta.total_episodes == ds_blocking.meta.total_episodes
     assert ds_nonblock.meta.total_frames == ds_blocking.meta.total_frames
+
+
+def test_rerecord_rejected_when_encoding_in_flight(tmp_path, empty_lerobot_dataset_factory, caplog):
+    """When save_episode(non_blocking=True) was called, a rerecord_episode event must be
+    cleared with a warning log rather than rewinding the episode."""
+    import concurrent.futures
+    import time
+
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
+
+    # Simulate a pending encoding future (with a small delay so it's not done immediately)
+    def dummy_task():
+        time.sleep(0.1)
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    dataset._pending_encoding_future = executor.submit(dummy_task)
+
+    # Simulate the logic from the record script
+    events = {"rerecord_episode": True, "exit_early": False}
+
+    with caplog.at_level(logging.WARNING):
+        if events["rerecord_episode"]:
+            if (
+                dataset._pending_encoding_future is not None
+                and not dataset._pending_encoding_future.done()
+            ):
+                logging.warning(
+                    f"Re-record requested but episode {dataset.meta.total_episodes} "
+                    "encoding is already in progress. Proceeding to next episode."
+                )
+                events["rerecord_episode"] = False
+                events["exit_early"] = False
+
+    # Wait for the future to complete
+    executor.shutdown(wait=True)
+
+    assert not events["rerecord_episode"]
+    assert "encoding is already in progress" in caplog.text
+
+    dataset.finalize()

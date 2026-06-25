@@ -512,11 +512,13 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     display_compressed_images=display_compressed_images,
                 )
 
+                # Kick off encoding immediately; reset phase and next recording overlap with it
+                dataset.save_episode(non_blocking=True)
+                recorded_episodes += 1
+
                 # Execute a few seconds without recording to give time to manually reset the environment
                 # Skip reset for the last episode to be recorded
-                if not events["stop_recording"] and (
-                    (recorded_episodes < cfg.dataset.num_episodes - 1) or events["rerecord_episode"]
-                ):
+                if not events["stop_recording"] and recorded_episodes < cfg.dataset.num_episodes:
                     log_say("Reset the environment", cfg.play_sounds)
 
                     # reset g1 robot
@@ -537,14 +539,16 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     )
 
                 if events["rerecord_episode"]:
-                    log_say("Re-record episode", cfg.play_sounds)
+                    if (
+                        dataset._pending_encoding_future is not None
+                        and not dataset._pending_encoding_future.done()
+                    ):
+                        logging.warning(
+                            f"Re-record requested but episode {recorded_episodes - 1} encoding is "
+                            "already in progress. Proceeding to next episode."
+                        )
                     events["rerecord_episode"] = False
                     events["exit_early"] = False
-                    dataset.clear_episode_buffer()
-                    continue
-
-                dataset.save_episode()
-                recorded_episodes += 1
     finally:
         log_say("Stop recording", cfg.play_sounds, blocking=True)
 

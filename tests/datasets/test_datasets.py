@@ -1728,3 +1728,72 @@ def test_finalize_ok_with_no_pending_future(tmp_path, empty_lerobot_dataset_fact
     features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
     dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
     dataset.finalize()  # must not raise
+
+
+def test_save_episode_non_blocking_raises_with_batch_encoding(tmp_path, empty_lerobot_dataset_factory):
+    """non_blocking=True with batch_encoding_size > 1 must raise ValueError."""
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+    dataset = empty_lerobot_dataset_factory(
+        root=tmp_path / "test", features=features, batch_encoding_size=2
+    )
+    dataset.add_frame({"state": torch.randn(1), "task": "Dummy task"})
+    with pytest.raises(ValueError, match="non_blocking=True is incompatible with batch_encoding_size"):
+        dataset.save_episode(non_blocking=True)
+
+
+def test_save_episode_non_blocking_commits_counter_before_returning(tmp_path, empty_lerobot_dataset_factory):
+    """After save_episode(non_blocking=True) returns, total_episodes must already be incremented."""
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
+    dataset.add_frame({"state": torch.randn(1), "task": "Dummy task"})
+
+    assert dataset.meta.total_episodes == 0
+    dataset.save_episode(non_blocking=True)
+    assert dataset.meta.total_episodes == 1  # incremented synchronously in Phase 1
+
+    dataset.finalize()
+
+
+def test_save_episode_non_blocking_clears_buffer_before_returning(tmp_path, empty_lerobot_dataset_factory):
+    """After save_episode(non_blocking=True) returns, episode_buffer must be reset for next episode."""
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
+    dataset.add_frame({"state": torch.randn(1), "task": "Dummy task"})
+
+    dataset.save_episode(non_blocking=True)
+    # Buffer is reset; the new buffer's episode_index must equal total_episodes (1)
+    assert dataset.episode_buffer["episode_index"] == 1
+
+    dataset.finalize()
+
+
+def test_save_episode_non_blocking_default_false_unchanged(tmp_path, empty_lerobot_dataset_factory):
+    """save_episode() with default non_blocking=False must behave identically to before."""
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
+    dataset.add_frame({"state": torch.randn(1), "task": "Dummy task"})
+    dataset.save_episode()  # non_blocking defaults to False
+    assert dataset.meta.total_episodes == 1
+    dataset.finalize()
+
+
+def test_save_episode_non_blocking_ordering(tmp_path, empty_lerobot_dataset_factory):
+    """Two consecutive non_blocking saves must produce the same dataset as two blocking saves."""
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+
+    # Blocking reference
+    ds_blocking = empty_lerobot_dataset_factory(root=tmp_path / "blocking", features=features)
+    for _ in range(2):
+        ds_blocking.add_frame({"state": torch.randn(1), "task": "Dummy task"})
+        ds_blocking.save_episode()
+    ds_blocking.finalize()
+
+    # Non-blocking
+    ds_nonblock = empty_lerobot_dataset_factory(root=tmp_path / "nonblock", features=features)
+    for _ in range(2):
+        ds_nonblock.add_frame({"state": torch.randn(1), "task": "Dummy task"})
+        ds_nonblock.save_episode(non_blocking=True)
+    ds_nonblock.finalize()
+
+    assert ds_nonblock.meta.total_episodes == ds_blocking.meta.total_episodes
+    assert ds_nonblock.meta.total_frames == ds_blocking.meta.total_frames

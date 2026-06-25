@@ -1186,23 +1186,30 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self,
         episode_data: dict | None = None,
         parallel_encoding: bool = True,
+        non_blocking: bool = False,
     ) -> None:
-        """
-        This will save to disk the current episode in self.episode_buffer.
+        """Save the current episode to disk.
 
-        Video encoding is handled automatically based on batch_encoding_size:
-        - If batch_encoding_size == 1: Videos are encoded immediately after each episode
-        - If batch_encoding_size > 1: Videos are encoded in batches.
+        Video encoding is handled based on batch_encoding_size and non_blocking:
+        - If batch_encoding_size == 1 and non_blocking=False: encode immediately (blocking).
+        - If batch_encoding_size == 1 and non_blocking=True: encode in background thread.
+        - If batch_encoding_size > 1: encode in batches (non_blocking=True not allowed).
 
         Args:
-            episode_data (dict | None, optional): Dict containing the episode data to save. If None, this will
-                save the current episode in self.episode_buffer, which is filled with 'add_frame'. Defaults to
-                None.
-            parallel_encoding (bool, optional): If True, encode videos in parallel using ProcessPoolExecutor.
-                Defaults to True on Linux, False on macOS as it tends to use all the CPU available already.
+            episode_data: Dict with episode data to save. If None, saves self.episode_buffer.
+            parallel_encoding: If True and multiple cameras, encode cameras in parallel processes.
+            non_blocking: If True, run video encoding in a background thread so the caller
+                can begin the next recording immediately. Incompatible with batch_encoding_size > 1.
         """
+        if non_blocking and self.batch_encoding_size > 1:
+            raise ValueError(
+                "non_blocking=True is incompatible with batch_encoding_size > 1. "
+                "Use one or the other, not both."
+            )
+
         episode_buffer = episode_data if episode_data is not None else self.episode_buffer
 
+        # ── Phase 1: synchronous work ──────────────────────────────────────────────────────────
         validate_episode_buffer(episode_buffer, self.meta.total_episodes, self.features)
 
         # size and task are special cases that won't be added to hf_dataset
@@ -1232,61 +1239,80 @@ class LeRobotDataset(torch.utils.data.Dataset):
         ep_stats = compute_episode_stats(episode_buffer, self.features)
 
         ep_metadata = self._save_episode_data(episode_buffer)
+
+        # Commit counters now so create_episode_buffer() for the next episode gets the right index
+        self.meta.info["total_episodes"] += 1
+        self.meta.info["total_frames"] += episode_length
+        self.meta.info["total_tasks"] = len(self.meta.tasks)
+        self.meta.info["splits"] = {"train": f"0:{self.meta.info['total_episodes']}"}
+        write_info(self.meta.info, self.meta.root)
+
+        if not episode_data:
+            # Reset episode buffer; delete image-feature PNGs (video-feature PNGs stay for Phase 2)
+            self.clear_episode_buffer(delete_images=len(self.meta.image_keys) > 0)
+
+        # ── Phase 2: video encoding + metadata commit ──────────────────────────────────────────
         has_video_keys = len(self.meta.video_keys) > 0
         use_batched_encoding = self.batch_encoding_size > 1
 
-        if has_video_keys and not use_batched_encoding:
-            num_cameras = len(self.meta.video_keys)
-            if parallel_encoding and num_cameras > 1:
-                # TODO(Steven): Ideally we would like to control the number of threads per encoding such that:
-                # num_cameras * num_threads = (total_cpu -1)
-                with concurrent.futures.ProcessPoolExecutor(max_workers=num_cameras) as executor:
-                    future_to_key = {
-                        executor.submit(
-                            _encode_video_worker,
-                            video_key,
-                            episode_index,
-                            self.root,
-                            self.fps,
-                            self.vcodec,
-                        ): video_key
-                        for video_key in self.meta.video_keys
-                    }
+        def _encode_and_commit() -> None:
+            nonlocal ep_metadata
 
-                    results = {}
-                    for future in concurrent.futures.as_completed(future_to_key):
-                        video_key = future_to_key[future]
-                        try:
-                            temp_path = future.result()
-                            results[video_key] = temp_path
-                        except Exception as exc:
-                            logging.error(f"Video encoding failed for {video_key}: {exc}")
-                            raise exc
+            if has_video_keys and not use_batched_encoding:
+                num_cameras = len(self.meta.video_keys)
+                if parallel_encoding and num_cameras > 1:
+                    # TODO(Steven): Ideally we would like to control the number of threads per encoding such that:
+                    # num_cameras * num_threads = (total_cpu -1)
+                    with concurrent.futures.ProcessPoolExecutor(max_workers=num_cameras) as executor:
+                        future_to_key = {
+                            executor.submit(
+                                _encode_video_worker,
+                                video_key,
+                                episode_index,
+                                self.root,
+                                self.fps,
+                                self.vcodec,
+                            ): video_key
+                            for video_key in self.meta.video_keys
+                        }
 
-                for video_key in self.meta.video_keys:
-                    temp_path = results[video_key]
-                    ep_metadata.update(
-                        self._save_episode_video(video_key, episode_index, temp_path=temp_path)
-                    )
-            else:
-                for video_key in self.meta.video_keys:
-                    ep_metadata.update(self._save_episode_video(video_key, episode_index))
+                        results: dict[str, Path] = {}
+                        for future in concurrent.futures.as_completed(future_to_key):
+                            video_key = future_to_key[future]
+                            try:
+                                results[video_key] = future.result()
+                            except Exception as exc:
+                                logging.error(f"Video encoding failed for {video_key}: {exc}")
+                                raise
 
-        # `meta.save_episode` need to be executed after encoding the videos
-        self.meta.save_episode(episode_index, episode_length, episode_tasks, ep_stats, ep_metadata)
+                    for video_key in self.meta.video_keys:
+                        ep_metadata.update(
+                            self._save_episode_video(video_key, episode_index, temp_path=results[video_key])
+                        )
+                else:
+                    for video_key in self.meta.video_keys:
+                        ep_metadata.update(self._save_episode_video(video_key, episode_index))
 
-        if has_video_keys and use_batched_encoding:
-            # Check if we should trigger batch encoding
-            self.episodes_since_last_encoding += 1
-            if self.episodes_since_last_encoding == self.batch_encoding_size:
-                start_ep = self.num_episodes - self.batch_encoding_size
-                end_ep = self.num_episodes
-                self._batch_save_episode_video(start_ep, end_ep)
-                self.episodes_since_last_encoding = 0
+            # Write episode metadata; counters were already committed in Phase 1
+            self.meta.save_episode(
+                episode_index, episode_length, episode_tasks, ep_stats, ep_metadata,
+                skip_counter_update=True,
+            )
 
-        if not episode_data:
-            # Reset episode buffer and clean up temporary images (if not already deleted during video encoding)
-            self.clear_episode_buffer(delete_images=len(self.meta.image_keys) > 0)
+            if has_video_keys and use_batched_encoding:
+                self.episodes_since_last_encoding += 1
+                if self.episodes_since_last_encoding == self.batch_encoding_size:
+                    start_ep = self.num_episodes - self.batch_encoding_size
+                    end_ep = self.num_episodes
+                    self._batch_save_episode_video(start_ep, end_ep)
+                    self.episodes_since_last_encoding = 0
+
+        if non_blocking:
+            if self._encoding_executor is None:
+                self._encoding_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            self._pending_encoding_future = self._encoding_executor.submit(_encode_and_commit)
+        else:
+            _encode_and_commit()
 
     def _batch_save_episode_video(self, start_episode: int, end_episode: int | None = None) -> None:
         """

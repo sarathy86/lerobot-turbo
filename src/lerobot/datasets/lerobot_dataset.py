@@ -1256,13 +1256,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
         use_batched_encoding = self.batch_encoding_size > 1
 
         def _encode_and_commit() -> None:
-            nonlocal ep_metadata
-
             if has_video_keys and not use_batched_encoding:
                 num_cameras = len(self.meta.video_keys)
                 if parallel_encoding and num_cameras > 1:
-                    # TODO(Steven): Ideally we would like to control the number of threads per encoding such that:
-                    # num_cameras * num_threads = (total_cpu -1)
+                    # TODO(Steven): Ideally control threads so num_cameras * num_threads = (total_cpu - 1)
                     with concurrent.futures.ProcessPoolExecutor(max_workers=num_cameras) as executor:
                         future_to_key = {
                             executor.submit(

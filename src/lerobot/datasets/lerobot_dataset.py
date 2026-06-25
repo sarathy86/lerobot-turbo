@@ -1100,10 +1100,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         )
 
     def finalize(self):
-        """
-        Close the parquet writers. This function needs to be called after data collection/conversion, else footer metadata won't be written to the parquet files.
-        The dataset won't be valid and can't be loaded as ds = LeRobotDataset(repo_id=repo, root=HF_LEROBOT_HOME.joinpath(repo))
-        """
+        """Close parquet writers. Must be called after data collection, else parquet footers won't be written."""
         if self._pending_encoding_future is not None:
             self._pending_encoding_future.result()  # wait; re-raises any encoding exception
         if self._encoding_executor is not None:

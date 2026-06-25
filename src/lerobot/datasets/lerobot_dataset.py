@@ -402,6 +402,7 @@ class LeRobotDatasetMetadata:
         episode_tasks: list[str],
         episode_stats: dict[str, dict],
         episode_metadata: dict,
+        skip_counter_update: bool = False,
     ) -> None:
         episode_dict = {
             "episode_index": episode_index,
@@ -412,13 +413,12 @@ class LeRobotDatasetMetadata:
         episode_dict.update(flatten_dict({"stats": episode_stats}))
         self._save_episode_metadata(episode_dict)
 
-        # Update info
-        self.info["total_episodes"] += 1
-        self.info["total_frames"] += episode_length
-        self.info["total_tasks"] = len(self.tasks)
-        self.info["splits"] = {"train": f"0:{self.info['total_episodes']}"}
-
-        write_info(self.info, self.root)
+        if not skip_counter_update:
+            self.info["total_episodes"] += 1
+            self.info["total_frames"] += episode_length
+            self.info["total_tasks"] = len(self.tasks)
+            self.info["splits"] = {"train": f"0:{self.info['total_episodes']}"}
+            write_info(self.info, self.root)
 
         self.stats = aggregate_stats([self.stats, episode_stats]) if self.stats is not None else episode_stats
         write_stats(self.stats, self.root)

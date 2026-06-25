@@ -1650,3 +1650,51 @@ def test_delta_timestamps_query_returns_correct_values(tmp_path, empty_lerobot_d
     # Previous frame is outside episode, so it's clamped to first frame and marked as padded
     assert state_values == [10.0, 10.0], f"Expected [10.0, 10.0], got {state_values}"
     assert is_pad == [True, False], f"Expected [True, False], got {is_pad}"
+
+
+def test_meta_save_episode_skip_counter_update(tmp_path, empty_lerobot_dataset_factory):
+    """skip_counter_update=True must not change total_episodes or total_frames."""
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
+    dataset.add_frame({"state": torch.randn(1), "task": "Dummy task"})
+
+    # Manually do Phase-1 book-keeping so meta has valid state
+    ep_buf = dataset.episode_buffer
+    ep_len = ep_buf.pop("size")
+    tasks = ep_buf.pop("task")
+    episode_tasks = list(set(tasks))
+    episode_index = ep_buf["episode_index"]
+    dataset.meta.save_episode_tasks(episode_tasks)
+
+    before_eps = dataset.meta.total_episodes
+    before_frames = dataset.meta.total_frames
+
+    # Call with skip_counter_update=True — counters must stay the same
+    dataset.meta.save_episode(
+        episode_index=episode_index,
+        episode_length=ep_len,
+        episode_tasks=episode_tasks,
+        episode_stats={"state": {"mean": np.array([0.0]), "std": np.array([1.0]),
+                                  "min": np.array([0.0]), "max": np.array([1.0]),
+                                  "count": np.array([1])}},
+        episode_metadata={},
+        skip_counter_update=True,
+    )
+
+    assert dataset.meta.total_episodes == before_eps
+    assert dataset.meta.total_frames == before_frames
+
+    # Calling WITHOUT skip_counter_update must increment as usual
+    dataset.meta.save_episode(
+        episode_index=episode_index,
+        episode_length=ep_len,
+        episode_tasks=episode_tasks,
+        episode_stats={"state": {"mean": np.array([0.0]), "std": np.array([1.0]),
+                                  "min": np.array([0.0]), "max": np.array([1.0]),
+                                  "count": np.array([1])}},
+        episode_metadata={},
+        skip_counter_update=False,
+    )
+
+    assert dataset.meta.total_episodes == before_eps + 1
+    assert dataset.meta.total_frames == before_frames + ep_len

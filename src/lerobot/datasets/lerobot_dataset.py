@@ -1379,7 +1379,15 @@ class LeRobotDataset(torch.utils.data.Dataset):
           or loads directly from pyarrow cache.
         """
         # Convert buffer into HF Dataset
-        ep_dict = {key: episode_buffer[key] for key in self.hf_features}
+        # Shape (1,) features map to datasets.Value (scalar). numpy 2.x no longer implicitly converts
+        # a shape-(1,) array to float, so squeeze those columns to a 1-d array of scalars.
+        ep_dict = {}
+        for key in self.hf_features:
+            col = episode_buffer[key]
+            ft = self.features.get(key)
+            if ft is not None and ft.get("shape") == (1,) and isinstance(col, np.ndarray) and col.ndim == 2:
+                col = col.squeeze(axis=-1)
+            ep_dict[key] = col
         ep_dataset = datasets.Dataset.from_dict(ep_dict, features=self.hf_features, split="train")
         ep_dataset = embed_images(ep_dataset)
         ep_num_frames = len(ep_dataset)

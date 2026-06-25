@@ -708,7 +708,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.writer = None
         self.latest_episode = None
         self._encoding_executor: concurrent.futures.ThreadPoolExecutor | None = None
-        self._pending_encoding_future: concurrent.futures.Future | None = None
+        self._encoding_futures: list[concurrent.futures.Future] = []
         self._current_file_start_frame = None  # Track the starting frame index of the current parquet file
 
         self.root.mkdir(exist_ok=True, parents=True)
@@ -1101,10 +1101,11 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
     def finalize(self):
         """Close parquet writers. Must be called after data collection, else parquet footers won't be written."""
-        if self._pending_encoding_future is not None:
-            self._pending_encoding_future.result()  # wait; re-raises any encoding exception
+        for future in self._encoding_futures:
+            future.result()  # wait and re-raise any encoding exception (preserves per-episode errors)
+        self._encoding_futures.clear()
         if self._encoding_executor is not None:
-            self._encoding_executor.shutdown(wait=True)  # drain any queued jobs
+            self._encoding_executor.shutdown(wait=True)
         self._close_writer()
         self.meta._close_writer()
 
@@ -1307,7 +1308,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if non_blocking:
             if self._encoding_executor is None:
                 self._encoding_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            self._pending_encoding_future = self._encoding_executor.submit(_encode_and_commit)
+            self._encoding_futures.append(self._encoding_executor.submit(_encode_and_commit))
         else:
             _encode_and_commit()
 
@@ -1642,7 +1643,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         obj.writer = None
         obj.latest_episode = None
         obj._encoding_executor = None
-        obj._pending_encoding_future = None
+        obj._encoding_futures: list[concurrent.futures.Future] = []
         obj._current_file_start_frame = None
         # Initialize tracking for incremental recording
         obj._lazy_loading = False

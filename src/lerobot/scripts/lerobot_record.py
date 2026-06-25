@@ -539,10 +539,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     )
 
                 if events["rerecord_episode"]:
-                    if (
-                        dataset._pending_encoding_future is not None
-                        and not dataset._pending_encoding_future.done()
-                    ):
+                    if dataset._encoding_futures and not dataset._encoding_futures[-1].done():
                         logging.warning(
                             f"Re-record requested but episode {recorded_episodes - 1} encoding is "
                             "already in progress. Proceeding to next episode."

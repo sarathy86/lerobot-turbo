@@ -1701,7 +1701,7 @@ def test_meta_save_episode_skip_counter_update(tmp_path, empty_lerobot_dataset_f
 
 
 def test_finalize_waits_for_pending_future(tmp_path, empty_lerobot_dataset_factory):
-    """finalize() must block until _pending_encoding_future completes."""
+    """finalize() must block until all submitted encoding futures complete."""
     import concurrent.futures
     import threading
 
@@ -1716,7 +1716,7 @@ def test_finalize_waits_for_pending_future(tmp_path, empty_lerobot_dataset_facto
         completed.set()
 
     dataset._encoding_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    dataset._pending_encoding_future = dataset._encoding_executor.submit(slow_job)
+    dataset._encoding_futures.append(dataset._encoding_executor.submit(slow_job))
 
     assert not completed.is_set()
     dataset.finalize()
@@ -1813,7 +1813,7 @@ def test_rerecord_rejected_when_encoding_in_flight(tmp_path, empty_lerobot_datas
         time.sleep(0.1)
 
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    dataset._pending_encoding_future = executor.submit(dummy_task)
+    dataset._encoding_futures.append(executor.submit(dummy_task))
 
     # Simulate the logic from the record script
     events = {"rerecord_episode": True, "exit_early": False}
@@ -1821,8 +1821,8 @@ def test_rerecord_rejected_when_encoding_in_flight(tmp_path, empty_lerobot_datas
     with caplog.at_level(logging.WARNING):
         if events["rerecord_episode"]:
             if (
-                dataset._pending_encoding_future is not None
-                and not dataset._pending_encoding_future.done()
+                dataset._encoding_futures
+                and not dataset._encoding_futures[-1].done()
             ):
                 logging.warning(
                     f"Re-record requested but episode {dataset.meta.total_episodes} "

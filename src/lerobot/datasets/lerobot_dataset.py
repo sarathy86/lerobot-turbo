@@ -707,6 +707,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.episode_buffer = None
         self.writer = None
         self.latest_episode = None
+        self._encoding_executor: concurrent.futures.ThreadPoolExecutor | None = None
+        self._pending_encoding_future: concurrent.futures.Future | None = None
         self._current_file_start_frame = None  # Track the starting frame index of the current parquet file
 
         self.root.mkdir(exist_ok=True, parents=True)
@@ -1102,6 +1104,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
         Close the parquet writers. This function needs to be called after data collection/conversion, else footer metadata won't be written to the parquet files.
         The dataset won't be valid and can't be loaded as ds = LeRobotDataset(repo_id=repo, root=HF_LEROBOT_HOME.joinpath(repo))
         """
+        if self._pending_encoding_future is not None:
+            self._pending_encoding_future.result()  # wait; re-raises any encoding exception
+        if self._encoding_executor is not None:
+            self._encoding_executor.shutdown(wait=True)  # drain any queued jobs
         self._close_writer()
         self.meta._close_writer()
 
@@ -1615,6 +1621,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         obj.video_backend = video_backend if video_backend is not None else get_safe_default_codec()
         obj.writer = None
         obj.latest_episode = None
+        obj._encoding_executor = None
+        obj._pending_encoding_future = None
         obj._current_file_start_frame = None
         # Initialize tracking for incremental recording
         obj._lazy_loading = False

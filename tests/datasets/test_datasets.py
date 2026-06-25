@@ -1698,3 +1698,33 @@ def test_meta_save_episode_skip_counter_update(tmp_path, empty_lerobot_dataset_f
 
     assert dataset.meta.total_episodes == before_eps + 1
     assert dataset.meta.total_frames == before_frames + ep_len
+
+
+def test_finalize_waits_for_pending_future(tmp_path, empty_lerobot_dataset_factory):
+    """finalize() must block until _pending_encoding_future completes."""
+    import concurrent.futures
+    import threading
+
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
+
+    completed = threading.Event()
+
+    def slow_job():
+        import time
+        time.sleep(0.05)
+        completed.set()
+
+    dataset._encoding_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    dataset._pending_encoding_future = dataset._encoding_executor.submit(slow_job)
+
+    assert not completed.is_set()
+    dataset.finalize()
+    assert completed.is_set()
+
+
+def test_finalize_ok_with_no_pending_future(tmp_path, empty_lerobot_dataset_factory):
+    """finalize() must not raise when no encoding was ever submitted."""
+    features = {"state": {"dtype": "float32", "shape": (1,), "names": ["x"]}}
+    dataset = empty_lerobot_dataset_factory(root=tmp_path / "test", features=features)
+    dataset.finalize()  # must not raise

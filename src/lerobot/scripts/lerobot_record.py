@@ -283,7 +283,7 @@ def record_loop(
     single_task: str | None = None,
     display_data: bool = False,
     display_compressed_images: bool = False,
-):
+) -> bool:
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
 
@@ -325,7 +325,7 @@ def record_loop(
 
         if events["exit_early"]:
             events["exit_early"] = False
-            break
+            return True
 
         # Get robot observation
         obs = robot.get_observation()
@@ -401,6 +401,8 @@ def record_loop(
         precise_sleep(max(1 / fps - dt_s, 0.0))
 
         timestamp = time.perf_counter() - start_episode_t
+
+    return False
 
 
 @parser.wrap()
@@ -494,7 +496,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             recorded_episodes = 0
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
                 log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
-                record_loop(
+                exited_early = record_loop(
                     robot=robot,
                     events=events,
                     fps=cfg.dataset.fps,
@@ -512,13 +514,24 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     display_compressed_images=display_compressed_images,
                 )
 
+                # Left arrow during recording: discard frames and re-record the same episode
+                if events["rerecord_episode"]:
+                    events["rerecord_episode"] = False
+                    events["exit_early"] = False
+                    dataset.clear_episode_buffer()
+                    continue
+
                 # Kick off encoding immediately; reset phase and next recording overlap with it
                 dataset.save_episode(non_blocking=True)
                 recorded_episodes += 1
 
-                # Execute a few seconds without recording to give time to manually reset the environment
-                # Skip reset for the last episode to be recorded
-                if not events["stop_recording"] and recorded_episodes < cfg.dataset.num_episodes:
+                # Skip reset when the user pressed right arrow during recording (they want the next
+                # episode immediately) or when this was the last episode to record.
+                if (
+                    not exited_early
+                    and not events["stop_recording"]
+                    and recorded_episodes < cfg.dataset.num_episodes
+                ):
                     log_say("Reset the environment", cfg.play_sounds)
 
                     # reset g1 robot
@@ -539,11 +552,11 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     )
 
                 if events["rerecord_episode"]:
-                    if dataset._encoding_futures and not dataset._encoding_futures[-1].done():
-                        logging.warning(
-                            f"Re-record requested but episode {recorded_episodes - 1} encoding is "
-                            "already in progress. Proceeding to next episode."
-                        )
+                    # Left arrow during reset: episode already saved, cannot discard it.
+                    logging.warning(
+                        f"Re-record requested during reset phase; episode {recorded_episodes - 1} was "
+                        "already saved. Proceeding to next episode."
+                    )
                     events["rerecord_episode"] = False
                     events["exit_early"] = False
     finally:

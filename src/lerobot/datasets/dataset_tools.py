@@ -75,7 +75,7 @@ def find_orphaned_episodes(root: str | Path, repo_id: str) -> tuple[list[int], l
     if meta.episodes is None:
         meta.episodes = load_episodes(root)
 
-    actual_episode_indices = set(meta.episodes.keys())
+    actual_episode_indices = set(meta.episodes["episode_index"])
     declared_count = meta.total_episodes
 
     # Episodes whose index is in info.json count but have no metadata entry at all.

@@ -264,7 +264,7 @@ def handle_delete_orphaned_episodes(cfg: EditDatasetConfig) -> None:
     )
 
     # Load dataset bypassing the video-file guard so delete_episodes can copy the good episodes.
-    dataset = LeRobotDataset(cfg.repo_id, root=dataset_root, check_video_files=False)
+    dataset = LeRobotDataset(cfg.repo_id, root=dataset_root, skip_integrity_check=True)
 
     # Ghost episodes exist in info.json's total_episodes count but have no metadata entry.
     # Patch total_episodes to match actual committed episodes so delete_episodes doesn't

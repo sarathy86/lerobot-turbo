@@ -570,7 +570,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         video_backend: str | None = None,
         batch_encoding_size: int = 1,
         vcodec: str = "libsvtav1",
-        check_video_files: bool = True,
+        skip_integrity_check: bool = False,
     ):
         """
         2 modes are available for instantiating this class, depending on 2 different use cases:
@@ -712,7 +712,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self._encoding_futures: list[concurrent.futures.Future] = []
         self._current_file_start_frame = None  # Track the starting frame index of the current parquet file
 
-        self.check_video_files = check_video_files
+        self.skip_integrity_check = skip_integrity_check
         self.root.mkdir(exist_ok=True, parents=True)
 
         # Load metadata
@@ -730,10 +730,18 @@ class LeRobotDataset(torch.utils.data.Dataset):
             if force_cache_sync:
                 raise FileNotFoundError
             self.hf_dataset = self.load_hf_dataset()
-            # Check if cached dataset contains all requested episodes
-            if not self._check_cached_episodes_sufficient():
+            # skip_integrity_check=True is for repair/admin operations (e.g. deleting
+            # orphaned episodes) that must load a dataset even when some episodes or
+            # video files are incomplete — skip all completeness checks in that case.
+            if not skip_integrity_check and not self._check_cached_episodes_sufficient():
                 raise FileNotFoundError("Cached dataset doesn't contain all requested episodes")
         except (AssertionError, FileNotFoundError, NotADirectoryError) as exc:
+            if skip_integrity_check:
+                # In repair mode any load failure is a genuine local problem;
+                # don't fall back to Hub download.
+                raise FileNotFoundError(
+                    f"Failed to load local dataset at '{self.root}' for repair. Original error: {exc}"
+                ) from exc
             # If data rows loaded but a video file is missing, this is a local recording
             # issue (encoding failure or interrupted session). Hub download cannot recover
             # locally-encoded video — raise a clear error instead of trying the Hub.
@@ -900,9 +908,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if not requested_episodes.issubset(available_episodes):
             return False
 
-        # Check if all required video files exist (skipped when check_video_files=False,
-        # e.g. for repair operations that need to load a dataset with orphaned episodes).
-        if self.check_video_files and len(self.meta.video_keys) > 0:
+        # Check if all required video files exist
+        if len(self.meta.video_keys) > 0:
             for ep_idx in requested_episodes:
                 for vid_key in self.meta.video_keys:
                     video_path = self.root / self.meta.get_video_file_path(ep_idx, vid_key)
@@ -1685,7 +1692,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         obj._lazy_loading = False
         obj._recorded_frames = 0
         obj._writer_closed_for_reading = False
-        obj.check_video_files = True
+        obj.skip_integrity_check = False
         return obj
 
 

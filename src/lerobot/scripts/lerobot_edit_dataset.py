@@ -263,12 +263,28 @@ def handle_delete_orphaned_episodes(cfg: EditDatasetConfig) -> None:
         f"({len(video_orphans)} missing video, {len(ghost_episodes)} ghost): {to_delete}"
     )
 
-    # Load dataset bypassing the video-file guard so delete_episodes can copy the good episodes.
+    if not video_orphans:
+        # Only ghost episodes — no data or video was ever written for them.
+        # Fix info.json in-place; no dataset rebuild needed.
+        from lerobot.datasets.dataset_tools import LeRobotDatasetMetadata
+        from lerobot.datasets.utils import write_info
+
+        meta = LeRobotDatasetMetadata(repo_id=cfg.repo_id, root=dataset_root)
+        actual_count = len(meta.episodes)
+        meta.info["total_episodes"] = actual_count
+        meta.info["splits"] = {"train": f"0:{actual_count}"}
+        write_info(meta.info, dataset_root)
+        logging.info(
+            f"Fixed info.json: total_episodes corrected from {actual_count + len(ghost_episodes)} "
+            f"→ {actual_count}. No data or videos were affected."
+        )
+        return
+
+    # There are video-orphaned episodes — need a full dataset rebuild via delete_episodes.
     dataset = LeRobotDataset(cfg.repo_id, root=dataset_root, skip_integrity_check=True)
 
-    # Ghost episodes exist in info.json's total_episodes count but have no metadata entry.
-    # Patch total_episodes to match actual committed episodes so delete_episodes doesn't
-    # try to iterate episode indices that have no metadata or data rows.
+    # Patch total_episodes so delete_episodes doesn't try to iterate ghost indices
+    # that have no metadata or data rows.
     if ghost_episodes:
         actual_count = len(dataset.meta.episodes)
         logging.info(
@@ -277,7 +293,6 @@ def handle_delete_orphaned_episodes(cfg: EditDatasetConfig) -> None:
         )
         dataset.meta.info["total_episodes"] = actual_count
 
-    # Only delete the video-orphaned episodes (ghosts are excluded by the patched count).
     output_repo_id, output_dir = get_output_path(
         cfg.repo_id, cfg.new_repo_id, Path(cfg.root) if cfg.root else None
     )

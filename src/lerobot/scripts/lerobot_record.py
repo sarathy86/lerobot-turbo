@@ -546,6 +546,11 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     events["exit_early"] = False
                     continue
 
+                # ESC: discard current episode and stop recording.
+                if events["stop_recording"]:
+                    dataset.clear_episode_buffer()
+                    break
+
                 # Right arrow (exited_early=True): user accepted the episode — save it.
                 # Kick off encoding immediately; next recording starts without waiting.
                 dataset.save_episode(non_blocking=True)

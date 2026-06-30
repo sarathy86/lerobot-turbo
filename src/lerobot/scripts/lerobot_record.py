@@ -551,6 +551,10 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     dataset.clear_episode_buffer()
                     break
 
+                # Right arrow pressed before any frames were recorded — nothing to save.
+                if dataset.episode_buffer["size"] == 0:
+                    continue
+
                 # Right arrow (exited_early=True): user accepted the episode — save it.
                 # Kick off encoding immediately; next recording starts without waiting.
                 dataset.save_episode(non_blocking=True)

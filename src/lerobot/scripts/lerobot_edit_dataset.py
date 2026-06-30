@@ -124,7 +124,8 @@ from lerobot.datasets.dataset_tools import (
     remove_feature,
     split_dataset,
 )
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.utils import write_info
 from lerobot.utils.constants import HF_LEROBOT_HOME
 from lerobot.utils.utils import init_logging
 
@@ -266,9 +267,6 @@ def handle_delete_orphaned_episodes(cfg: EditDatasetConfig) -> None:
     if not video_orphans:
         # Only ghost episodes — no data or video was ever written for them.
         # Fix info.json in-place; no dataset rebuild needed.
-        from lerobot.datasets.dataset_tools import LeRobotDatasetMetadata
-        from lerobot.datasets.utils import write_info
-
         meta = LeRobotDatasetMetadata(repo_id=cfg.repo_id, root=dataset_root)
         actual_count = len(meta.episodes)
         meta.info["total_episodes"] = actual_count

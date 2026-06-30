@@ -156,7 +156,7 @@ class DatasetRecordConfig:
     # Number of seconds for data recording for each episode.
     episode_time_s: int | float = 60
     # Number of seconds for resetting the environment after each episode.
-    reset_time_s: int | float = 60
+    reset_time_s: int | float = 30
     # Number of episodes to record.
     num_episodes: int = 50
     # Encode frames in the dataset into video
@@ -514,51 +514,42 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     display_compressed_images=display_compressed_images,
                 )
 
-                # Left arrow during recording: discard frames and re-record the same episode
+                # Left arrow during recording: discard frames and re-record immediately (no reset).
                 if events["rerecord_episode"]:
                     events["rerecord_episode"] = False
                     events["exit_early"] = False
                     dataset.clear_episode_buffer()
                     continue
 
-                # Kick off encoding immediately; reset phase and next recording overlap with it
-                dataset.save_episode(non_blocking=True)
-                recorded_episodes += 1
-
-                # Skip reset when the user pressed right arrow during recording (they want the next
-                # episode immediately) or when this was the last episode to record.
-                if (
-                    not exited_early
-                    and not events["stop_recording"]
-                    and recorded_episodes < cfg.dataset.num_episodes
-                ):
-                    log_say("Reset the environment", cfg.play_sounds)
-
-                    # reset g1 robot
-                    if robot.name == "unitree_g1":
-                        robot.reset()
-
-                    record_loop(
-                        robot=robot,
-                        events=events,
-                        fps=cfg.dataset.fps,
-                        teleop_action_processor=teleop_action_processor,
-                        robot_action_processor=robot_action_processor,
-                        robot_observation_processor=robot_observation_processor,
-                        teleop=teleop,
-                        control_time_s=cfg.dataset.reset_time_s,
-                        single_task=cfg.dataset.single_task,
-                        display_data=cfg.display_data,
-                    )
-
-                if events["rerecord_episode"]:
-                    # Left arrow during reset: episode already saved, cannot discard it.
-                    logging.warning(
-                        f"Re-record requested during reset phase; episode {recorded_episodes - 1} was "
-                        "already saved. Proceeding to next episode."
-                    )
+                if not exited_early:
+                    # Natural timeout: episode was not explicitly accepted. Discard the frames,
+                    # run the reset phase to let the user reposition, then re-record.
+                    dataset.clear_episode_buffer()
+                    if not events["stop_recording"]:
+                        log_say("Reset the environment", cfg.play_sounds)
+                        if robot.name == "unitree_g1":
+                            robot.reset()
+                        record_loop(
+                            robot=robot,
+                            events=events,
+                            fps=cfg.dataset.fps,
+                            teleop_action_processor=teleop_action_processor,
+                            robot_action_processor=robot_action_processor,
+                            robot_observation_processor=robot_observation_processor,
+                            teleop=teleop,
+                            control_time_s=cfg.dataset.reset_time_s,
+                            single_task=cfg.dataset.single_task,
+                            display_data=cfg.display_data,
+                        )
+                    # Discard any key events that fired during reset; we are re-recording.
                     events["rerecord_episode"] = False
                     events["exit_early"] = False
+                    continue
+
+                # Right arrow (exited_early=True): user accepted the episode — save it.
+                # Kick off encoding immediately; next recording starts without waiting.
+                dataset.save_episode(non_blocking=True)
+                recorded_episodes += 1
     finally:
         log_say("Stop recording", cfg.play_sounds, blocking=True)
 

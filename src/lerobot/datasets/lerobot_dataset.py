@@ -570,6 +570,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         video_backend: str | None = None,
         batch_encoding_size: int = 1,
         vcodec: str = "libsvtav1",
+        check_video_files: bool = True,
     ):
         """
         2 modes are available for instantiating this class, depending on 2 different use cases:
@@ -711,6 +712,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self._encoding_futures: list[concurrent.futures.Future] = []
         self._current_file_start_frame = None  # Track the starting frame index of the current parquet file
 
+        self.check_video_files = check_video_files
         self.root.mkdir(exist_ok=True, parents=True)
 
         # Load metadata
@@ -898,8 +900,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if not requested_episodes.issubset(available_episodes):
             return False
 
-        # Check if all required video files exist
-        if len(self.meta.video_keys) > 0:
+        # Check if all required video files exist (skipped when check_video_files=False,
+        # e.g. for repair operations that need to load a dataset with orphaned episodes).
+        if self.check_video_files and len(self.meta.video_keys) > 0:
             for ep_idx in requested_episodes:
                 for vid_key in self.meta.video_keys:
                     video_path = self.root / self.meta.get_video_file_path(ep_idx, vid_key)
@@ -1682,6 +1685,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         obj._lazy_loading = False
         obj._recorded_frames = 0
         obj._writer_closed_for_reading = False
+        obj.check_video_files = True
         return obj
 
 

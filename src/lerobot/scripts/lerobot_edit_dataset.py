@@ -118,6 +118,7 @@ from lerobot.configs import parser
 from lerobot.datasets.dataset_tools import (
     convert_image_to_video_dataset,
     delete_episodes,
+    find_orphaned_episodes,
     merge_datasets,
     modify_tasks,
     remove_feature,
@@ -132,6 +133,11 @@ from lerobot.utils.utils import init_logging
 class DeleteEpisodesConfig:
     type: str = "delete_episodes"
     episode_indices: list[int] | None = None
+
+
+@dataclass
+class DeleteOrphanedEpisodesConfig:
+    type: str = "delete_orphaned_episodes"
 
 
 @dataclass
@@ -179,6 +185,7 @@ class EditDatasetConfig:
     repo_id: str
     operation: (
         DeleteEpisodesConfig
+        | DeleteOrphanedEpisodesConfig
         | SplitConfig
         | MergeConfig
         | RemoveFeatureConfig
@@ -234,6 +241,45 @@ def handle_delete_episodes(cfg: EditDatasetConfig) -> None:
 
     logging.info(f"Dataset saved to {output_dir}")
     logging.info(f"Episodes: {new_dataset.meta.total_episodes}, Frames: {new_dataset.meta.total_frames}")
+
+    if cfg.push_to_hub:
+        logging.info(f"Pushing to hub as {output_repo_id}")
+        LeRobotDataset(output_repo_id, root=output_dir).push_to_hub()
+
+
+def handle_delete_orphaned_episodes(cfg: EditDatasetConfig) -> None:
+    root = Path(cfg.root) if cfg.root else None
+    orphaned = find_orphaned_episodes(
+        root / cfg.repo_id if root else HF_LEROBOT_HOME / cfg.repo_id, cfg.repo_id
+    )
+
+    if not orphaned:
+        logging.info("No orphaned episodes found — dataset is clean.")
+        return
+
+    logging.info(f"Found {len(orphaned)} orphaned episode(s): {orphaned}")
+
+    # Load dataset bypassing the video-file guard so delete_episodes can copy the good episodes.
+    dataset_root = root / cfg.repo_id if root else HF_LEROBOT_HOME / cfg.repo_id
+    dataset = LeRobotDataset(cfg.repo_id, root=dataset_root, check_video_files=False)
+    output_repo_id, output_dir = get_output_path(
+        cfg.repo_id, cfg.new_repo_id, Path(cfg.root) if cfg.root else None
+    )
+
+    if cfg.new_repo_id is None:
+        dataset.root = Path(str(dataset.root) + "_old")
+
+    new_dataset = delete_episodes(
+        dataset,
+        episode_indices=orphaned,
+        output_dir=output_dir,
+        repo_id=output_repo_id,
+    )
+
+    logging.info(f"Dataset saved to {output_dir}")
+    logging.info(
+        f"Episodes remaining: {new_dataset.meta.total_episodes}, Frames: {new_dataset.meta.total_frames}"
+    )
 
     if cfg.push_to_hub:
         logging.info(f"Pushing to hub as {output_repo_id}")
@@ -439,6 +485,8 @@ def edit_dataset(cfg: EditDatasetConfig) -> None:
 
     if operation_type == "delete_episodes":
         handle_delete_episodes(cfg)
+    elif operation_type == "delete_orphaned_episodes":
+        handle_delete_orphaned_episodes(cfg)
     elif operation_type == "split":
         handle_split(cfg)
     elif operation_type == "merge":
@@ -452,7 +500,8 @@ def edit_dataset(cfg: EditDatasetConfig) -> None:
     else:
         raise ValueError(
             f"Unknown operation type: {operation_type}\n"
-            f"Available operations: delete_episodes, split, merge, remove_feature, modify_tasks, convert_image_to_video"
+            f"Available operations: delete_episodes, delete_orphaned_episodes, split, merge, "
+            f"remove_feature, modify_tasks, convert_image_to_video"
         )
 
 

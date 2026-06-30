@@ -56,6 +56,36 @@ from lerobot.datasets.video_utils import encode_video_frames, get_video_info
 from lerobot.utils.constants import HF_LEROBOT_HOME, OBS_IMAGE
 
 
+def find_orphaned_episodes(root: str | Path, repo_id: str) -> list[int]:
+    """Find episodes that have data but are missing one or more video files.
+
+    Uses only the dataset metadata — does not load the full HF dataset.
+    Returns a list of episode indices that should be removed.
+    """
+    from lerobot.datasets.utils import load_episodes
+
+    root = Path(root)
+    meta = LeRobotDatasetMetadata(repo_id=repo_id, root=root)
+
+    if not meta.video_keys:
+        logging.info("Dataset has no video keys — no orphaned episodes possible.")
+        return []
+
+    if meta.episodes is None:
+        meta.episodes = load_episodes(root)
+
+    orphaned: list[int] = []
+    for ep_idx in range(meta.total_episodes):
+        for vid_key in meta.video_keys:
+            video_path = root / meta.get_video_file_path(ep_idx, vid_key)
+            if not video_path.exists():
+                logging.warning(f"Episode {ep_idx} is orphaned: missing {video_path}")
+                orphaned.append(ep_idx)
+                break  # one missing camera is enough to flag the episode
+
+    return orphaned
+
+
 def _load_episode_with_stats(src_dataset: LeRobotDataset, episode_idx: int) -> dict:
     """Load a single episode's metadata including stats from parquet file.
 

@@ -56,34 +56,50 @@ from lerobot.datasets.video_utils import encode_video_frames, get_video_info
 from lerobot.utils.constants import HF_LEROBOT_HOME, OBS_IMAGE
 
 
-def find_orphaned_episodes(root: str | Path, repo_id: str) -> list[int]:
-    """Find episodes that have data but are missing one or more video files.
+def find_orphaned_episodes(root: str | Path, repo_id: str) -> tuple[list[int], list[int]]:
+    """Find episodes that are incomplete and should be removed.
 
     Uses only the dataset metadata — does not load the full HF dataset.
-    Returns a list of episode indices that should be removed.
+
+    Returns:
+        (video_orphans, ghost_episodes) where:
+        - video_orphans: episode indices that have metadata but are missing ≥1 video file
+        - ghost_episodes: episode indices present in info.json total_episodes count but
+          with no episode metadata entry at all (never committed)
     """
     from lerobot.datasets.utils import load_episodes
 
     root = Path(root)
     meta = LeRobotDatasetMetadata(repo_id=repo_id, root=root)
 
-    if not meta.video_keys:
-        logging.info("Dataset has no video keys — no orphaned episodes possible.")
-        return []
-
     if meta.episodes is None:
         meta.episodes = load_episodes(root)
 
-    orphaned: list[int] = []
-    for ep_idx in range(meta.total_episodes):
+    actual_episode_indices = set(meta.episodes.keys())
+    declared_count = meta.total_episodes
+
+    # Episodes whose index is in info.json count but have no metadata entry at all.
+    ghost_episodes = [i for i in range(declared_count) if i not in actual_episode_indices]
+    if ghost_episodes:
+        logging.warning(
+            f"Found {len(ghost_episodes)} ghost episode(s) with no metadata (never committed): "
+            f"{ghost_episodes}"
+        )
+
+    if not meta.video_keys:
+        logging.info("Dataset has no video keys — skipping video file check.")
+        return [], ghost_episodes
+
+    video_orphans: list[int] = []
+    for ep_idx in actual_episode_indices:
         for vid_key in meta.video_keys:
             video_path = root / meta.get_video_file_path(ep_idx, vid_key)
             if not video_path.exists():
                 logging.warning(f"Episode {ep_idx} is orphaned: missing {video_path}")
-                orphaned.append(ep_idx)
+                video_orphans.append(ep_idx)
                 break  # one missing camera is enough to flag the episode
 
-    return orphaned
+    return sorted(video_orphans), ghost_episodes
 
 
 def _load_episode_with_stats(src_dataset: LeRobotDataset, episode_idx: int) -> dict:

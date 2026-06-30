@@ -249,19 +249,35 @@ def handle_delete_episodes(cfg: EditDatasetConfig) -> None:
 
 def handle_delete_orphaned_episodes(cfg: EditDatasetConfig) -> None:
     root = Path(cfg.root) if cfg.root else None
-    orphaned = find_orphaned_episodes(
-        root / cfg.repo_id if root else HF_LEROBOT_HOME / cfg.repo_id, cfg.repo_id
-    )
+    dataset_root = root / cfg.repo_id if root else HF_LEROBOT_HOME / cfg.repo_id
 
-    if not orphaned:
+    video_orphans, ghost_episodes = find_orphaned_episodes(dataset_root, cfg.repo_id)
+    to_delete = sorted(set(video_orphans) | set(ghost_episodes))
+
+    if not to_delete:
         logging.info("No orphaned episodes found — dataset is clean.")
         return
 
-    logging.info(f"Found {len(orphaned)} orphaned episode(s): {orphaned}")
+    logging.info(
+        f"Found {len(to_delete)} episode(s) to remove "
+        f"({len(video_orphans)} missing video, {len(ghost_episodes)} ghost): {to_delete}"
+    )
 
     # Load dataset bypassing the video-file guard so delete_episodes can copy the good episodes.
-    dataset_root = root / cfg.repo_id if root else HF_LEROBOT_HOME / cfg.repo_id
     dataset = LeRobotDataset(cfg.repo_id, root=dataset_root, check_video_files=False)
+
+    # Ghost episodes exist in info.json's total_episodes count but have no metadata entry.
+    # Patch total_episodes to match actual committed episodes so delete_episodes doesn't
+    # try to iterate episode indices that have no metadata or data rows.
+    if ghost_episodes:
+        actual_count = len(dataset.meta.episodes)
+        logging.info(
+            f"Patching total_episodes from {dataset.meta.total_episodes} → {actual_count} "
+            f"to exclude {len(ghost_episodes)} uncommitted ghost episode(s)."
+        )
+        dataset.meta.info["total_episodes"] = actual_count
+
+    # Only delete the video-orphaned episodes (ghosts are excluded by the patched count).
     output_repo_id, output_dir = get_output_path(
         cfg.repo_id, cfg.new_repo_id, Path(cfg.root) if cfg.root else None
     )
@@ -271,7 +287,7 @@ def handle_delete_orphaned_episodes(cfg: EditDatasetConfig) -> None:
 
     new_dataset = delete_episodes(
         dataset,
-        episode_indices=orphaned,
+        episode_indices=video_orphans,
         output_dir=output_dir,
         repo_id=output_repo_id,
     )

@@ -1101,13 +1101,16 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
     def finalize(self):
         """Close parquet writers. Must be called after data collection, else parquet footers won't be written."""
-        for future in self._encoding_futures:
-            future.result()  # wait and re-raise any encoding exception (preserves per-episode errors)
-        self._encoding_futures.clear()
-        if self._encoding_executor is not None:
-            self._encoding_executor.shutdown(wait=True)
-        self._close_writer()
-        self.meta._close_writer()
+        try:
+            for future in self._encoding_futures:
+                future.result()  # wait and re-raise any encoding exception (preserves per-episode errors)
+            self._encoding_futures.clear()
+            if self._encoding_executor is not None:
+                self._encoding_executor.shutdown(wait=True)
+        finally:
+            # Always close writers so the parquet footer is written even if encoding raised.
+            self._close_writer()
+            self.meta._close_writer()
 
     def create_episode_buffer(self, episode_index: int | None = None) -> dict:
         current_ep_idx = self.meta.total_episodes if episode_index is None else episode_index
@@ -1293,7 +1296,11 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
             # Write episode metadata; counters were already committed in Phase 1
             self.meta.save_episode(
-                episode_index, episode_length, episode_tasks, ep_stats, ep_metadata,
+                episode_index,
+                episode_length,
+                episode_tasks,
+                ep_stats,
+                ep_metadata,
                 skip_counter_update=True,
             )
 

@@ -731,7 +731,16 @@ class LeRobotDataset(torch.utils.data.Dataset):
             # Check if cached dataset contains all requested episodes
             if not self._check_cached_episodes_sufficient():
                 raise FileNotFoundError("Cached dataset doesn't contain all requested episodes")
-        except (AssertionError, FileNotFoundError, NotADirectoryError):
+        except (AssertionError, FileNotFoundError, NotADirectoryError) as exc:
+            # If data rows loaded but a video file is missing, this is a local recording
+            # issue (encoding failure or interrupted session). Hub download cannot recover
+            # locally-encoded video — raise a clear error instead of trying the Hub.
+            hf_data_present = getattr(self, "hf_dataset", None)
+            if hf_data_present is not None and len(hf_data_present) > 0:
+                raise FileNotFoundError(
+                    f"Local dataset at '{self.root}' is missing one or more video files "
+                    f"(see warning above for the exact path). Original error: {exc}"
+                ) from exc
             if is_valid_version(self.revision):
                 self.revision = get_safe_version(self.repo_id, self.revision)
             self.download(download_videos)
@@ -895,6 +904,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 for vid_key in self.meta.video_keys:
                     video_path = self.root / self.meta.get_video_file_path(ep_idx, vid_key)
                     if not video_path.exists():
+                        logging.warning(
+                            f"Missing video file for episode {ep_idx}, camera '{vid_key}': {video_path}"
+                        )
                         return False
 
         return True

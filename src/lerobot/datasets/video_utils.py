@@ -650,6 +650,14 @@ class VideoEncodingManager:
         # Finalize the dataset to properly close all writers
         self.dataset.finalize()
 
+        # Remove any temp directories left by failed or interrupted video encoding.
+        # These are created by tempfile.mkdtemp(dir=dataset.root) in _encode_video_worker
+        # and normally deleted inside _save_episode_video, but can survive if encoding
+        # raised or the process was interrupted.
+        for tmp_dir in sorted(self.dataset.root.glob("tmp????????")):
+            if tmp_dir.is_dir():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
         # Clean up episode images if recording was interrupted
         if exc_type is not None:
             interrupted_episode_index = self.dataset.num_episodes

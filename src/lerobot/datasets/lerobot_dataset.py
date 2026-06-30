@@ -1284,6 +1284,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
                                 results[video_key] = future.result()
                             except Exception as exc:
                                 logging.error(f"Video encoding failed for {video_key}: {exc}")
+                                # Clean up temp dirs from cameras that already finished.
+                                for tmp_path in results.values():
+                                    shutil.rmtree(str(tmp_path.parent), ignore_errors=True)
                                 raise
 
                     for video_key in self.meta.video_keys:
@@ -1486,60 +1489,63 @@ class LeRobotDataset(torch.utils.data.Dataset):
         else:
             ep_path = temp_path
 
-        ep_size_in_mb = get_file_size_in_mb(ep_path)
-        ep_duration_in_s = get_video_duration_in_s(ep_path)
+        try:
+            ep_size_in_mb = get_file_size_in_mb(ep_path)
+            ep_duration_in_s = get_video_duration_in_s(ep_path)
 
-        if (
-            episode_index == 0
-            or self.meta.latest_episode is None
-            or f"videos/{video_key}/chunk_index" not in self.meta.latest_episode
-        ):
-            # Initialize indices for a new dataset made of the first episode data
-            chunk_idx, file_idx = 0, 0
-            if self.meta.episodes is not None and len(self.meta.episodes) > 0:
-                # It means we are resuming recording, so we need to load the latest episode
-                # Update the indices to avoid overwriting the latest episode
-                old_chunk_idx = self.meta.episodes[-1][f"videos/{video_key}/chunk_index"]
-                old_file_idx = self.meta.episodes[-1][f"videos/{video_key}/file_index"]
-                chunk_idx, file_idx = update_chunk_file_indices(
-                    old_chunk_idx, old_file_idx, self.meta.chunks_size
-                )
-            latest_duration_in_s = 0.0
-            new_path = self.root / self.meta.video_path.format(
-                video_key=video_key, chunk_index=chunk_idx, file_index=file_idx
-            )
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(ep_path), str(new_path))
-        else:
-            # Retrieve information from the latest updated video file using latest_episode
-            latest_ep = self.meta.latest_episode
-            chunk_idx = latest_ep[f"videos/{video_key}/chunk_index"][0]
-            file_idx = latest_ep[f"videos/{video_key}/file_index"][0]
-
-            latest_path = self.root / self.meta.video_path.format(
-                video_key=video_key, chunk_index=chunk_idx, file_index=file_idx
-            )
-            latest_size_in_mb = get_file_size_in_mb(latest_path)
-            latest_duration_in_s = latest_ep[f"videos/{video_key}/to_timestamp"][0]
-
-            if latest_size_in_mb + ep_size_in_mb >= self.meta.video_files_size_in_mb:
-                # Move temporary episode video to a new video file in the dataset
-                chunk_idx, file_idx = update_chunk_file_indices(chunk_idx, file_idx, self.meta.chunks_size)
+            if (
+                episode_index == 0
+                or self.meta.latest_episode is None
+                or f"videos/{video_key}/chunk_index" not in self.meta.latest_episode
+            ):
+                # Initialize indices for a new dataset made of the first episode data
+                chunk_idx, file_idx = 0, 0
+                if self.meta.episodes is not None and len(self.meta.episodes) > 0:
+                    # It means we are resuming recording, so we need to load the latest episode
+                    # Update the indices to avoid overwriting the latest episode
+                    old_chunk_idx = self.meta.episodes[-1][f"videos/{video_key}/chunk_index"]
+                    old_file_idx = self.meta.episodes[-1][f"videos/{video_key}/file_index"]
+                    chunk_idx, file_idx = update_chunk_file_indices(
+                        old_chunk_idx, old_file_idx, self.meta.chunks_size
+                    )
+                latest_duration_in_s = 0.0
                 new_path = self.root / self.meta.video_path.format(
                     video_key=video_key, chunk_index=chunk_idx, file_index=file_idx
                 )
                 new_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(ep_path), str(new_path))
-                latest_duration_in_s = 0.0
             else:
-                # Update latest video file
-                concatenate_video_files(
-                    [latest_path, ep_path],
-                    latest_path,
-                )
+                # Retrieve information from the latest updated video file using latest_episode
+                latest_ep = self.meta.latest_episode
+                chunk_idx = latest_ep[f"videos/{video_key}/chunk_index"][0]
+                file_idx = latest_ep[f"videos/{video_key}/file_index"][0]
 
-        # Remove temporary directory
-        shutil.rmtree(str(ep_path.parent))
+                latest_path = self.root / self.meta.video_path.format(
+                    video_key=video_key, chunk_index=chunk_idx, file_index=file_idx
+                )
+                latest_size_in_mb = get_file_size_in_mb(latest_path)
+                latest_duration_in_s = latest_ep[f"videos/{video_key}/to_timestamp"][0]
+
+                if latest_size_in_mb + ep_size_in_mb >= self.meta.video_files_size_in_mb:
+                    # Move temporary episode video to a new video file in the dataset
+                    chunk_idx, file_idx = update_chunk_file_indices(
+                        chunk_idx, file_idx, self.meta.chunks_size
+                    )
+                    new_path = self.root / self.meta.video_path.format(
+                        video_key=video_key, chunk_index=chunk_idx, file_index=file_idx
+                    )
+                    new_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(ep_path), str(new_path))
+                    latest_duration_in_s = 0.0
+                else:
+                    # Update latest video file
+                    concatenate_video_files(
+                        [latest_path, ep_path],
+                        latest_path,
+                    )
+        finally:
+            # Always remove the temp directory, even if encoding or concatenation raised.
+            shutil.rmtree(str(ep_path.parent), ignore_errors=True)
 
         # Update video info (only needed when first episode is encoded since it reads from episode 0)
         if episode_index == 0:

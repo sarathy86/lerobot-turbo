@@ -18,10 +18,12 @@
 
 > **Making AI for Robotics more accessible—and faster—with end-to-end learning.**
 
-`lerobot-turbo` is an optimized, high-throughput fork of Hugging Face's [`lerobot`](https://github.com/huggingface/lerobot). While preserving complete compatibility with LeRobot's ecosystem, models, and dataset formats, this repository introduces **parallel data recording** to maximize collection efficiency and eliminate hardware loop latencies.
+`lerobot-turbo` is a modified version of the [LeRobot](https://github.com/huggingface/lerobot) repo, built to address a number of bottlenecks encountered during dataset recording. These changes cut dataset recording time by ~60%, and are shared here so everyone can benefit, this repository introduces **parallel data recording** to maximize collection efficiency and eliminate hardware loop latencies.
 
 ### ⚡ Why Turbo?
 LeRobot excels at lowering the barrier to entry for physical AI. `lerobot-turbo` accelerates this mission by ensuring that multiple high-resolution camera feeds, joint states, and peripheral telemetry streams are captured concurrently. By moving heavy I/O operations out of the main control loop, you can achieve consistent target FPS and collect high-quality imitation learning datasets in a fraction of the time.
+
+This fork also includes a command-line tool to review and clean video datasets — see `Review & Clean dataset` topic for further details.
 
 ## Recent Changes
 
@@ -65,12 +67,6 @@ python -m lerobot.scripts.lerobot_edit_dataset \
 🤗 State-of-the-art policies that have been shown to transfer to the real-world ready for training and deployment.
 
 🤗 Comprehensive support for the open-source ecosystem to democratize physical AI.
-
-## About lerobot-turbo
-
-`lerobot-turbo` is a modified version of the [LeRobot](https://github.com/huggingface/lerobot) repo, built to address a number of bottlenecks encountered during dataset recording. These changes cut dataset recording time by ~60%, and are shared here so everyone can benefit.
-
-This fork also includes a command-line tool to review and clean video datasets — see `review-dataset.sh` in the repo.
 
 ### Review & clean datasets with `review-dataset.sh`
 

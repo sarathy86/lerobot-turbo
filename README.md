@@ -81,19 +81,6 @@ Then launch the script with the episode number to start from:
 ```bash
 ./review-dataset.sh <episode-number>
 ```
-
-## Quick Start
-
-LeRobot can be installed directly from PyPI.
-
-```bash
-pip install lerobot
-lerobot-info
-```
-
-> [!IMPORTANT]
-> For detailed installation guide, please see the [Installation Documentation](https://huggingface.co/docs/lerobot/installation).
-
 ## Robots & Control
 
 <div align="center">

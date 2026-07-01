@@ -24,6 +24,26 @@
 
 🤗 Comprehensive support for the open-source ecosystem to democratize physical AI.
 
+## About lerobot-turbo
+
+`lerobot-turbo` is a modified version of the [LeRobot](https://github.com/huggingface/lerobot) repo, built to address a number of bottlenecks encountered during dataset recording. These changes cut dataset recording time by ~60%, and are shared here so everyone can benefit.
+
+This fork also includes a command-line tool to review and clean video datasets — see `review-dataset.sh` in the repo.
+
+### Review & clean datasets with `review-dataset.sh`
+
+Export the local path to the dataset repo you want to review:
+
+```bash
+export REPO_PATH=<local/path/to/repo>
+```
+
+Then launch the script with the episode number to start from:
+
+```bash
+./review-dataset.sh <episode-number>
+```
+
 ## Quick Start
 
 LeRobot can be installed directly from PyPI.

@@ -14,6 +14,15 @@
 
 </div>
 
+# lerobot-turbo 🚀🤖
+
+> **Making AI for Robotics more accessible—and faster—with end-to-end learning.**
+
+`lerobot-turbo` is an optimized, high-throughput fork of Hugging Face's [`lerobot`](https://github.com/huggingface/lerobot). While preserving complete compatibility with LeRobot's ecosystem, models, and dataset formats, this repository introduces **parallel data recording** to maximize collection efficiency and eliminate hardware loop latencies.
+
+### ⚡ Why Turbo?
+LeRobot excels at lowering the barrier to entry for physical AI. `lerobot-turbo` accelerates this mission by ensuring that multiple high-resolution camera feeds, joint states, and peripheral telemetry streams are captured concurrently. By moving heavy I/O operations out of the main control loop, you can achieve consistent target FPS and collect high-quality imitation learning datasets in a fraction of the time.
+
 **LeRobot** aims to provide models, datasets, and tools for real-world robotics in PyTorch. The goal is to lower the barrier to entry so that everyone can contribute to and benefit from shared datasets and pretrained models.
 
 🤗 A hardware-agnostic, Python-native interface that standardizes control across diverse platforms, from low-cost arms (SO-100) to humanoids.

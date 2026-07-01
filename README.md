@@ -14,6 +14,48 @@
 
 </div>
 
+# lerobot-turbo 🚀🤖
+
+> **Making AI for Robotics more accessible—and faster—with end-to-end learning.**
+
+`lerobot-turbo` is an optimized, high-throughput fork of Hugging Face's [`lerobot`](https://github.com/huggingface/lerobot). While preserving complete compatibility with LeRobot's ecosystem, models, and dataset formats, this repository introduces **parallel data recording** to maximize collection efficiency and eliminate hardware loop latencies.
+
+### ⚡ Why Turbo?
+LeRobot excels at lowering the barrier to entry for physical AI. `lerobot-turbo` accelerates this mission by ensuring that multiple high-resolution camera feeds, joint states, and peripheral telemetry streams are captured concurrently. By moving heavy I/O operations out of the main control loop, you can achieve consistent target FPS and collect high-quality imitation learning datasets in a fraction of the time.
+
+## Recent Changes
+
+### Recording (`lerobot-record`)
+
+**Explicit save required — new keyboard workflow:**
+
+| Key | Behavior |
+|-----|----------|
+| **→ Right arrow** | Save episode, start next immediately (no reset phase) |
+| **← Left arrow** | Discard episode, re-record immediately (no reset phase) |
+| **Timeout** | Discard episode, run reset phase (default lowered 60 s → 30 s), re-record |
+| **ESC** | Discard episode and exit cleanly without saving |
+
+- Pressing right arrow before any frames are recorded is now a no-op (re-records instead of crashing).
+- Video encoding runs in the background — the next recording starts immediately after right arrow while the previous episode's video encodes in parallel.
+
+### Dataset tools (`lerobot-edit-dataset`)
+
+**New operation — `delete_orphaned_episodes`:** detects and removes episodes whose Parquet rows exist but whose video files are missing (e.g. from an interrupted or failed recording).
+
+```bash
+python -m lerobot.scripts.lerobot_edit_dataset \
+    --repo_id your/dataset \
+    --root /path/to/datasets \
+    --operation.type delete_orphaned_episodes
+```
+
+**Bug fixes:**
+- `LeRobotDataset` no longer silently falls back to the Hub when a local video file is missing — raises a clear error instead.
+- `finalize()` always closes Parquet writers and cleans up temp encoding dirs, even when encoding raises an exception.
+- Fixed crash when encoding shape-`(1,)` columns.
+- All background encoding futures are tracked so exceptions are never silently lost.
+
 **LeRobot** aims to provide models, datasets, and tools for real-world robotics in PyTorch. The goal is to lower the barrier to entry so that everyone can contribute to and benefit from shared datasets and pretrained models.
 
 🤗 A hardware-agnostic, Python-native interface that standardizes control across diverse platforms, from low-cost arms (SO-100) to humanoids.
